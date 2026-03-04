@@ -1,70 +1,60 @@
-import time
-import os
-import pandas as pd
 import requests
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.chrome.service import Service
+import pandas as pd
+import os
+import datetime
+from bs4 import BeautifulSoup
 
-TOKEN = "8414648377:AAG7kfPA7wvYAwz5cXqW8gcfXAL7p-RWFoc"
-CHAT_ID = "1787584864"
+TOKEN = "TU_TOKEN"
+CHAT_ID = "TU_CHAT_ID"
 
 URL = "https://www.idealista.com/venta-viviendas/burgos-burgos/con-precio-hasta_200000,metros-cuadrados-mas-de_80,de-dos-dormitorios,de-tres-dormitorios,de-cuatro-cinco-habitaciones-o-mas/"
 
-def enviar_telegram(mensaje):
+HEADERS = {"User-Agent": "Mozilla/5.0"}
+
+def enviar_telegram(msg):
     url = f"https://api.telegram.org/bot{TOKEN}/sendMessage"
-    data = {"chat_id": CHAT_ID, "text": mensaje}
-    requests.post(url, data=data)
+    requests.post(url, data={"chat_id": CHAT_ID, "text": msg})
 
-def obtener_anuncios():
-    service = Service("chromedriver.exe")
-    driver = webdriver.Chrome(service=service)
-    driver.get(URL)
-    time.sleep(5)
+def obtener_pisos():
+    r = requests.get(URL, headers=HEADERS)
+    soup = BeautifulSoup(r.text, "html.parser")
 
-    anuncios = []
+    enlaces = []
 
-    while True:
-        items = driver.find_elements(By.CSS_SELECTOR, "a.item-link")
+    for a in soup.select("a.item-link"):
+        enlace = a.get("href")
+        if enlace:
+            if not enlace.startswith("http"):
+                enlace = "https://www.idealista.com" + enlace
+            enlaces.append(enlace)
 
-        for item in items:
-            enlace = item.get_attribute("href")
-            if enlace:
-                anuncios.append(enlace)
-
-        try:
-            siguiente = driver.find_element(By.CSS_SELECTOR, "li.next a")
-            siguiente.click()
-            time.sleep(5)
-        except:
-            break
-
-    driver.quit()
-    return list(set(anuncios))
+    return list(set(enlaces))
 
 def main():
+
     archivo = "historico_pisos.xlsx"
 
-    anuncios_actuales = obtener_anuncios()
-    df_actual = pd.DataFrame(anuncios_actuales, columns=["enlace"])
+    actuales = pd.DataFrame(obtener_pisos(), columns=["enlace"])
 
     if os.path.exists(archivo):
-        df_antiguo = pd.read_excel(archivo)
-        nuevos = df_actual[~df_actual["enlace"].isin(df_antiguo["enlace"])]
-        df_total = pd.concat([df_antiguo, df_actual]).drop_duplicates()
-    else:
-        nuevos = df_actual
-        df_total = df_actual
+        historico = pd.read_excel(archivo)
 
-    df_total.to_excel(archivo, index=False)
+        nuevos = actuales[~actuales["enlace"].isin(historico["enlace"])]
+        total = pd.concat([historico, actuales]).drop_duplicates()
+
+    else:
+        nuevos = actuales
+        total = actuales
+
+    total.to_excel(archivo, index=False)
 
     if len(nuevos) > 0:
-        mensaje = f"🏡 {len(nuevos)} nuevos pisos encontrados:\n\n"
-        for enlace in nuevos["enlace"].head(5):
-            mensaje += enlace + "\n"
-        enviar_telegram(mensaje)
+        msg = f"🏡 {len(nuevos)} nuevos pisos encontrados:\n\n"
+        for e in nuevos["enlace"].head(5):
+            msg += e + "\n"
+        enviar_telegram(msg)
     else:
-        enviar_telegram("Hoy no hay anuncios nuevos.")
+        enviar_telegram("Hoy no hay pisos nuevos")
 
 if __name__ == "__main__":
     main()
